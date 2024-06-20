@@ -14,3 +14,7 @@ pip install -r requirements.txt
 ```
 
 The notebooks can be found at the `notebooks` folder.
+
+### Google Earth Engine (GEE) Code Editor (JavaScript)
+
+For running the GEE notebook, please set up an account in [Google Earth Engine](https://earthengine.google.com/). The scripts will be run in the [JavaScript Code Editor](https://code.earthengine.google.com/).
