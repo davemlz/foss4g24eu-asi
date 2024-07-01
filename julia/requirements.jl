@@ -1,0 +1,10 @@
+using Pkg
+Pkg.activate(".")
+Pkg.add("SpectralIndices")
+Pkg.add("YAXArrays")
+Pkg.add("DataFrames")
+Pkg.add("DimensionalData")
+Pkg.add("GLMakie")
+Pkg.add("BenchmarkTools")
+Pkg.instantiate()
+Pkg.precompile()
