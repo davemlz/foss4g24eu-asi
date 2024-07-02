@@ -1,0 +1,1737 @@
+{
+  "nbformat": 4,
+  "nbformat_minor": 0,
+  "metadata": {
+    "colab": {
+      "provenance": []
+    },
+    "kernelspec": {
+      "name": "julia",
+      "display_name": "julia 1.10.2"
+    }
+  },
+  "cells": [
+    {
+      "cell_type": "markdown",
+      "source": [
+        "# SpectralIndices.jl\n",
+        "\n",
+        "This tutorial closely follows the SpectralIndices.jl documentation. It provides a gentle walk through of all the features of the package in an incremental fashion.\n",
+        "\n",
+        "If you are running this notebbok on Google colab please run this cell below. It contains all the packages and Julia installation we need for the workshop. After running the cell please reload the page to load the new Julia runtime. If this doens't work, go to Runtime->Change runtime type and change from Python3 to julia 1.10.2"
+      ],
+      "metadata": {
+        "id": "KH3FVAeHp8YW"
+      }
+    },
+    {
+      "cell_type": "code",
+      "execution_count": 1,
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "_VGRt7TEj-74",
+        "outputId": "44b982a6-5471-42d9-beb4-57d5170eee0d"
+      },
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": []
+          },
+          "metadata": {},
+          "execution_count": 1
+        }
+      ],
+      "source": [
+        "%%shell\n",
+        "set -e\n",
+        "\n",
+        "#---------------------------------------------------#\n",
+        "JULIA_VERSION=\"1.10.2\" # any version ≥ 0.7.0\n",
+        "JULIA_PACKAGES=\"IJulia BenchmarkTools SpectralIndices YAXArrays DataFrames DimensionalData\"\n",
+        "JULIA_PACKAGES_IF_GPU=\"CUDA\" # or CuArrays for older Julia versions\n",
+        "JULIA_NUM_THREADS=2\n",
+        "#---------------------------------------------------#\n",
+        "\n",
+        "if [ -z `which julia` ]; then\n",
+        "  # Install Julia\n",
+        "  JULIA_VER=`cut -d '.' -f -2 <<< \"$JULIA_VERSION\"`\n",
+        "  echo \"Installing Julia $JULIA_VERSION on the current Colab Runtime...\"\n",
+        "  BASE_URL=\"https://julialang-s3.julialang.org/bin/linux/x64\"\n",
+        "  URL=\"$BASE_URL/$JULIA_VER/julia-$JULIA_VERSION-linux-x86_64.tar.gz\"\n",
+        "  wget -nv $URL -O /tmp/julia.tar.gz # -nv means \"not verbose\"\n",
+        "  tar -x -f /tmp/julia.tar.gz -C /usr/local --strip-components 1\n",
+        "  rm /tmp/julia.tar.gz\n",
+        "\n",
+        "  # Install Packages\n",
+        "  nvidia-smi -L &> /dev/null && export GPU=1 || export GPU=0\n",
+        "  if [ $GPU -eq 1 ]; then\n",
+        "    JULIA_PACKAGES=\"$JULIA_PACKAGES $JULIA_PACKAGES_IF_GPU\"\n",
+        "  fi\n",
+        "  for PKG in `echo $JULIA_PACKAGES`; do\n",
+        "    echo \"Installing Julia package $PKG...\"\n",
+        "    julia -e 'using Pkg; pkg\"add '$PKG'; precompile;\"' &> /dev/null\n",
+        "  done\n",
+        "\n",
+        "  # Install kernel and rename it to \"julia\"\n",
+        "  echo \"Installing IJulia kernel...\"\n",
+        "  julia -e 'using IJulia; IJulia.installkernel(\"julia\", env=Dict(\n",
+        "      \"JULIA_NUM_THREADS\"=>\"'\"$JULIA_NUM_THREADS\"'\"))'\n",
+        "  KERNEL_DIR=`julia -e \"using IJulia; print(IJulia.kerneldir())\"`\n",
+        "  KERNEL_NAME=`ls -d \"$KERNEL_DIR\"/julia*`\n",
+        "  mv -f $KERNEL_NAME \"$KERNEL_DIR\"/julia\n",
+        "\n",
+        "  echo ''\n",
+        "  echo \"Successfully installed `julia -v`!\"\n",
+        "  echo \"Please reload this page (press Ctrl+R, ⌘+R, or the F5 key) then\"\n",
+        "  echo \"jump to the 'Checking the Installation' section.\"\n",
+        "fi"
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "using SpectralIndices"
+      ],
+      "metadata": {
+        "id": "ocKJNuC7kC-s"
+      },
+      "execution_count": 1,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Introduction to Indices Calculation\n",
+        "We want to calculate the NDVI. Let's create the variables needed for this"
+      ],
+      "metadata": {
+        "id": "uCca56Veqn_K"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "nir = 6723\n",
+        "red = 1243"
+      ],
+      "metadata": {
+        "id": "yHMVH4WnmRlJ",
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "outputId": "450c3b75-dc00-4646-e3e3-bedf8eebfbfe"
+      },
+      "execution_count": 2,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "1243"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 2
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now let's explore the NDVI by simply calling it in the repl\n"
+      ],
+      "metadata": {
+        "id": "HYL6uJHsquId"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDVI"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "hJdwLMkZqfU3",
+        "outputId": "f3b4b50c-0392-4dcb-c175-6af6400477fc"
+      },
+      "execution_count": 3,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "NDVI: Normalized Difference Vegetation Index\n",
+              "* Application Domain: vegetation\n",
+              "* Bands/Parameters: Any[\"N\", \"R\"]\n",
+              "* Formula: (N-R)/(N+R)\n",
+              "* Reference: https://ntrs.nasa.gov/citations/19740022614\n"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 3
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "as we can see all useful information is already there!\n",
+        "What's more is that this struct also acts as a callable function"
+      ],
+      "metadata": {
+        "id": "sjDoXW49qy3_"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDVI(Float32, nir, red)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "_WN2-Grtqv54",
+        "outputId": "d794be4e-c042-4eec-d21b-b441e01fb5de"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 6
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Pretty neat stuff, although I wouldnt' recommend using this as your primary mode of calculating indices. If you still want to use it make sure the order of the parameters\n",
+        "matches how they appear in the `bands` field of the index:"
+      ],
+      "metadata": {
+        "id": "4WbejYOTq2lE"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDVI.bands\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "Wy0KF61Fq1g_",
+        "outputId": "d7980cad-1a72-4591-9d6c-abf9db55897f"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " \"N\"\n",
+              " \"R\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 7
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "A more flexible way, and the suggested approach, to calculate indices is through the `compute_index` function. This function accepts either the `SpectralIndex` struct or the spectral index name as input and parameters as either a dictionary or keyword arguments:"
+      ],
+      "metadata": {
+        "id": "SuWJyAh9q8xF"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"NDVI\"; N=nir, R=red)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "GEr3kzBSq5re",
+        "outputId": "29274fe1-d85f-4842-fbab-778b81c781cc"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 8
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(NDVI; N=nir, R=red)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "vhaIwxI0rBzo",
+        "outputId": "71dc2610-a129-4412-ebdf-ffbcfca37941"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 9
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "params_nr = Dict(\n",
+        "    \"N\" => nir,\n",
+        "    \"R\" => red\n",
+        ")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "9FG_11xOrDa5",
+        "outputId": "4c8d0411-b38f-418c-818b-95e18b82e76c"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "Dict{String, Int64} with 2 entries:\n",
+              "  \"N\" => 6723\n",
+              "  \"R\" => 1243"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 10
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "ndvi_stpr = compute_index(\"NDVI\", params_nr)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "u0a_BXxXrFjQ",
+        "outputId": "a298711b-80cb-4ce6-ee18-e2c08df66cbe"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 11
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(NDVI, params_nr)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "vnqcG6UarHU_",
+        "outputId": "36642119-8b66-4565-8fc6-369f1841982c"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 12
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "### Quick sidenote on implementation details"
+      ],
+      "metadata": {
+        "id": "mC3eKOYVrMC3"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "function ndvi_funcstring_eval(N, R; string_formula = \"(N-R)/(N+R)\")\n",
+        "    formula_with_values = replace(string_formula, \"N\" => \"($N)\", \"R\" => \"($R)\")\n",
+        "    expr = Meta.parse(formula_with_values)\n",
+        "    result = eval(expr)\n",
+        "    return result\n",
+        "end\n",
+        "\n",
+        "function ndvi_funcstring_il(N, R; string_formula = \"(N-R)/(N+R)\")\n",
+        "    func_str = \"f(N, R) = $string_formula\"\n",
+        "    expr = Meta.parse(func_str)\n",
+        "    eval(expr)\n",
+        "    result = Base.invokelatest(f, N, R)\n",
+        "    return result\n",
+        "end\n",
+        "\n",
+        "ndvi_pure(N, R) = (N-R)/(N+R)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "brzmflU2rJEh",
+        "outputId": "79ea9552-3cfc-4fee-a81a-1f079480319d"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "ndvi_pure (generic function with 1 method)"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 13
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "using BenchmarkTools"
+      ],
+      "metadata": {
+        "id": "UwNKeQqtrSYZ"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "@benchmark ndvi_funcstring_eval(0.2, 0.1)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "BNgSP0OurXJN",
+        "outputId": "fd024b89-9655-4690-c2a4-eefac3f26070"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "BenchmarkTools.Trial: 10000 samples with 1 evaluation.\n",
+              " Range \u001b[90m(\u001b[39m\u001b[36m\u001b[1mmin\u001b[22m\u001b[39m … \u001b[35mmax\u001b[39m\u001b[90m):  \u001b[39m\u001b[36m\u001b[1m146.405 μs\u001b[22m\u001b[39m … \u001b[35m 10.103 ms\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmin … max\u001b[90m): \u001b[39m0.00% … 95.94%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[34m\u001b[1mmedian\u001b[22m\u001b[39m\u001b[90m):     \u001b[39m\u001b[34m\u001b[1m157.544 μs               \u001b[22m\u001b[39m\u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmedian\u001b[90m):    \u001b[39m0.00%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[32m\u001b[1mmean\u001b[22m\u001b[39m ± \u001b[32mσ\u001b[39m\u001b[90m):   \u001b[39m\u001b[32m\u001b[1m172.994 μs\u001b[22m\u001b[39m ± \u001b[32m150.127 μs\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmean ± σ\u001b[90m):  \u001b[39m1.03% ±  1.35%\n",
+              "\n",
+              "  \u001b[39m▅\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[34m▇\u001b[39m\u001b[39m▇\u001b[39m▆\u001b[39m▆\u001b[39m▅\u001b[39m▄\u001b[32m▃\u001b[39m\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▂\u001b[39m▃\u001b[39m▂\u001b[39m▂\u001b[39m▁\u001b[39m▁\u001b[39m▁\u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m▃\n",
+              "  \u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[34m█\u001b[39m\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[32m█\u001b[39m\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[39m▇\u001b[39m▆\u001b[39m▇\u001b[39m▇\u001b[39m█\u001b[39m▆\u001b[39m█\u001b[39m▇\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[39m█\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m▆\u001b[39m▆\u001b[39m▇\u001b[39m▅\u001b[39m▃\u001b[39m▄\u001b[39m▁\u001b[39m▅\u001b[39m \u001b[39m█\n",
+              "  146 μs\u001b[90m        \u001b[39m\u001b[90mHistogram: \u001b[39m\u001b[90m\u001b[1mlog(\u001b[22m\u001b[39m\u001b[90mfrequency\u001b[39m\u001b[90m\u001b[1m)\u001b[22m\u001b[39m\u001b[90m by time\u001b[39m        309 μs \u001b[0m\u001b[1m<\u001b[22m\n",
+              "\n",
+              " Memory estimate\u001b[90m: \u001b[39m\u001b[33m10.03 KiB\u001b[39m, allocs estimate\u001b[90m: \u001b[39m\u001b[33m159\u001b[39m."
+            ]
+          },
+          "metadata": {},
+          "execution_count": 15
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "@benchmark ndvi_funcstring_il(0.2, 0.1)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "L7QBZ-TXra0r",
+        "outputId": "5b3a8da4-35d1-45b1-dbd9-a4c5b8a1030c"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "BenchmarkTools.Trial: 577 samples with 1 evaluation.\n",
+              " Range \u001b[90m(\u001b[39m\u001b[36m\u001b[1mmin\u001b[22m\u001b[39m … \u001b[35mmax\u001b[39m\u001b[90m):  \u001b[39m\u001b[36m\u001b[1m5.900 ms\u001b[22m\u001b[39m … \u001b[35m24.584 ms\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmin … max\u001b[90m): \u001b[39m0.00% … 0.00%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[34m\u001b[1mmedian\u001b[22m\u001b[39m\u001b[90m):     \u001b[39m\u001b[34m\u001b[1m8.285 ms              \u001b[22m\u001b[39m\u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmedian\u001b[90m):    \u001b[39m0.00%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[32m\u001b[1mmean\u001b[22m\u001b[39m ± \u001b[32mσ\u001b[39m\u001b[90m):   \u001b[39m\u001b[32m\u001b[1m8.620 ms\u001b[22m\u001b[39m ± \u001b[32m 1.867 ms\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmean ± σ\u001b[90m):  \u001b[39m0.00% ± 0.00%\n",
+              "\n",
+              "  \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m▅\u001b[39m▃\u001b[39m█\u001b[39m▃\u001b[39m▃\u001b[34m▄\u001b[39m\u001b[39m▃\u001b[39m▂\u001b[32m▂\u001b[39m\u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \n",
+              "  \u001b[39m▅\u001b[39m█\u001b[39m▅\u001b[39m▃\u001b[39m▅\u001b[39m▄\u001b[39m▄\u001b[39m▃\u001b[39m▄\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[34m█\u001b[39m\u001b[39m█\u001b[39m█\u001b[32m█\u001b[39m\u001b[39m█\u001b[39m▅\u001b[39m▃\u001b[39m▄\u001b[39m▄\u001b[39m▅\u001b[39m▅\u001b[39m█\u001b[39m▆\u001b[39m▅\u001b[39m▆\u001b[39m▃\u001b[39m▅\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▂\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▁\u001b[39m▂\u001b[39m▂\u001b[39m▂\u001b[39m▃\u001b[39m▁\u001b[39m▁\u001b[39m▂\u001b[39m▂\u001b[39m▂\u001b[39m▁\u001b[39m▁\u001b[39m▁\u001b[39m▂\u001b[39m▁\u001b[39m▁\u001b[39m▂\u001b[39m▃\u001b[39m \u001b[39m▃\n",
+              "  5.9 ms\u001b[90m         Histogram: frequency by time\u001b[39m        14.8 ms \u001b[0m\u001b[1m<\u001b[22m\n",
+              "\n",
+              " Memory estimate\u001b[90m: \u001b[39m\u001b[33m62.32 KiB\u001b[39m, allocs estimate\u001b[90m: \u001b[39m\u001b[33m945\u001b[39m."
+            ]
+          },
+          "metadata": {},
+          "execution_count": 16
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "@benchmark ndvi_pure(0.2, 0.1)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "cNVbfCUercYJ",
+        "outputId": "91ef2121-037a-4c9c-da9e-dac9d89287af"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "BenchmarkTools.Trial: 10000 samples with 1000 evaluations.\n",
+              " Range \u001b[90m(\u001b[39m\u001b[36m\u001b[1mmin\u001b[22m\u001b[39m … \u001b[35mmax\u001b[39m\u001b[90m):  \u001b[39m\u001b[36m\u001b[1m1.882 ns\u001b[22m\u001b[39m … \u001b[35m39.608 ns\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmin … max\u001b[90m): \u001b[39m0.00% … 0.00%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[34m\u001b[1mmedian\u001b[22m\u001b[39m\u001b[90m):     \u001b[39m\u001b[34m\u001b[1m1.919 ns              \u001b[22m\u001b[39m\u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmedian\u001b[90m):    \u001b[39m0.00%\n",
+              " Time  \u001b[90m(\u001b[39m\u001b[32m\u001b[1mmean\u001b[22m\u001b[39m ± \u001b[32mσ\u001b[39m\u001b[90m):   \u001b[39m\u001b[32m\u001b[1m2.279 ns\u001b[22m\u001b[39m ± \u001b[32m 0.990 ns\u001b[39m  \u001b[90m┊\u001b[39m GC \u001b[90m(\u001b[39mmean ± σ\u001b[90m):  \u001b[39m0.00% ± 0.00%\n",
+              "\n",
+              "  \u001b[39m█\u001b[34m▅\u001b[39m\u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[32m▂\u001b[39m\u001b[39m▄\u001b[39m▄\u001b[39m▄\u001b[39m▄\u001b[39m▄\u001b[39m▄\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▂\u001b[39m▂\u001b[39m▁\u001b[39m▁\u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m \u001b[39m▂\n",
+              "  \u001b[39m█\u001b[34m█\u001b[39m\u001b[39m▆\u001b[39m▅\u001b[39m▁\u001b[39m▃\u001b[39m▃\u001b[39m▃\u001b[39m▁\u001b[39m▁\u001b[39m▁\u001b[39m▆\u001b[32m█\u001b[39m\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m█\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m█\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m▇\u001b[39m▆\u001b[39m▇\u001b[39m▇\u001b[39m▆\u001b[39m▆\u001b[39m▄\u001b[39m▅\u001b[39m▄\u001b[39m▄\u001b[39m▁\u001b[39m▃\u001b[39m▄\u001b[39m▄\u001b[39m▅\u001b[39m▄\u001b[39m▄\u001b[39m▅\u001b[39m▅\u001b[39m \u001b[39m█\n",
+              "  1.88 ns\u001b[90m      \u001b[39m\u001b[90mHistogram: \u001b[39m\u001b[90m\u001b[1mlog(\u001b[22m\u001b[39m\u001b[90mfrequency\u001b[39m\u001b[90m\u001b[1m)\u001b[22m\u001b[39m\u001b[90m by time\u001b[39m     3.78 ns \u001b[0m\u001b[1m<\u001b[22m\n",
+              "\n",
+              " Memory estimate\u001b[90m: \u001b[39m\u001b[33m0 bytes\u001b[39m, allocs estimate\u001b[90m: \u001b[39m\u001b[33m0\u001b[39m."
+            ]
+          },
+          "metadata": {},
+          "execution_count": 17
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "As we can see the pure julia function as virtually no overhead, showing\n",
+        "- zero memory allocations\n",
+        "- nanosecond-level execution time\n",
+        "\n",
+        "The function based on eval shows:\n",
+        "- efficient runtime evaluation of the function\n",
+        "- usable microsecond range\n",
+        "- this method is not usable in the context of a package, due to the world age problem\n",
+        "\n",
+        "The function with invokelast solves the world age problem but:\n",
+        "- Has the highest overhead in terms of both execution time and memory usage\n",
+        "- Scales poorly for large quantites of data\n",
+        "\n",
+        "## Extending the examples: a new index and floats"
+      ],
+      "metadata": {
+        "id": "rHOV4IpereT4"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "SAVI"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "vTd3NATHrivr",
+        "outputId": "eefbba55-80eb-455d-b26a-5f39a3921df1"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "SAVI: Soil-Adjusted Vegetation Index\n",
+              "* Application Domain: vegetation\n",
+              "* Bands/Parameters: Any[\"L\", \"N\", \"R\"]\n",
+              "* Formula: (1.0+L)*(N-R)/(N+R+L)\n",
+              "* Reference: https://doi.org/10.1016/0034-4257(88)90106-X\n"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 18
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "SAVI.bands"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "-v2fL2gJrmpF",
+        "outputId": "b535d7d9-e9d2-4d5c-da8d-01f9af54caad"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "3-element Vector{Any}:\n",
+              " \"L\"\n",
+              " \"N\"\n",
+              " \"R\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 19
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "The `L` parameter is new in this example.\n",
+        "Thankfully, SpectralIndices.jl provides a list of constant values handy that we can leverage in this situation:"
+      ],
+      "metadata": {
+        "id": "WluYWDoVrq-0"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "constants[\"L\"]"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "1feSpL_erno1",
+        "outputId": "656ea58c-b203-4ee6-9bb8-4d15a5138d93"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "L: Canopy background adjustment\n",
+              "* Description: Canopy background adjustment\n",
+              "* Standard: L\n",
+              "* Default value: 1.0\n",
+              "* Current value: 1.0\n"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 20
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now that we know what L is, let's proceed with the calculation.\n",
+        "\n",
+        "\n",
+        "SAVI needs input data to be between -1 and 1"
+      ],
+      "metadata": {
+        "id": "4RSNzlZQrxN1"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "scaled_nir = nir/10000\n",
+        "scaled_red = red/10000"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "bxVaGLLbrtVt",
+        "outputId": "ae05b5ac-239b-43c1-8b34-e0ad2d7f55df"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.1243"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 23
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"SAVI\", Dict(\n",
+        "    \"N\" => scaled_nir,\n",
+        "    \"R\" => scaled_red,\n",
+        "    \"L\" => 0.5)\n",
+        ")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "M8mM2DBFrvgf",
+        "outputId": "3a3586c9-6969-4d9b-9119-d8fd214cf6b8"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6339657565941694"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 24
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"SAVI\"; N=scaled_nir, R=scaled_red, L=0.5)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "G2l_8zORr2AK",
+        "outputId": "c33bad8a-4f49-48ab-f2a7-288a851943ee"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "0.6339657565941694"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 25
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now that we have introduced multiple indices let's see how we can compute multiple indices at the same time:"
+      ],
+      "metadata": {
+        "id": "xAjKg_Jwr4S-"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "params_mi = Dict(\n",
+        "    \"N\" => nir,\n",
+        "    \"R\" => red,\n",
+        "    \"L\" => 0.5\n",
+        ")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "7bHVuj2Cr3lu",
+        "outputId": "d9acb532-9cf9-422d-d883-8f7943a52c01"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "Dict{String, Real} with 3 entries:\n",
+              "  \"N\" => 6723\n",
+              "  \"L\" => 0.5\n",
+              "  \"R\" => 1243"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 26
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"SAVI\"], params_mi)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "dDs5k05mr6-0",
+        "outputId": "7f1fd12a-c75d-4861-aafd-49fe43bfcd8e"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " 0.6879236756213909\n",
+              " 1.0318207493880625"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 27
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"SAVI\"]; N=scaled_nir, R=scaled_red, L=0.5)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "cktQtVzxr9QA",
+        "outputId": "075f27f1-a1f3-48f8-80aa-5ace4f8860d1"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " 0.687923675621391\n",
+              " 0.6339657565941694"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 28
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "All of this can be extended to vectors as well:"
+      ],
+      "metadata": {
+        "id": "-zb4P-7NsBjk"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "params_miv = Dict(\n",
+        "    \"N\" => fill(nir, 10),\n",
+        "    \"R\" => fill(red, 10),\n",
+        "    \"L\" => fill(0.5, 10)\n",
+        ")"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "MuvAUfrgr-rk",
+        "outputId": "154d4387-58fc-4a64-95c3-763c5d73404b"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "Dict{String, Vector} with 3 entries:\n",
+              "  \"N\" => [6723, 6723, 6723, 6723, 6723, 6723, 6723, 6723, 6723, 6723]\n",
+              "  \"L\" => [0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]\n",
+              "  \"R\" => [1243, 1243, 1243, 1243, 1243, 1243, 1243, 1243, 1243, 1243]"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 30
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"SAVI\"], params_miv)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "96724VWBsAFY",
+        "outputId": "6ec9d529-50e7-481f-8fc2-80a608517844"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " [0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909]\n",
+              " [1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625]"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 31
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "We can use the same params to calculate single indices.\n",
+        "The additional bands are just going to be ignored:"
+      ],
+      "metadata": {
+        "id": "7uOblwiRsFAx"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"NDVI\", params_miv)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "hPsD74PCsEWy",
+        "outputId": "7d69e133-cd0b-4392-a3f3-db25faf0c12a"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "10-element Vector{Float64}:\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909\n",
+              " 0.6879236756213909"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 32
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"SAVI\", params_miv)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "iKF7r07usIFB",
+        "outputId": "864d6f1a-e6be-40bc-9ed9-52cdf40a748f"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "10-element Vector{Float64}:\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625\n",
+              " 1.0318207493880625"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 34
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Using kwargs is also still straightforward as before"
+      ],
+      "metadata": {
+        "id": "H-ljThMEsMwl"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"SAVI\"];\n",
+        "    N=fill(nir, 10),\n",
+        "    R=fill(red, 10),\n",
+        "    L=fill(0.5, 10))"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "IRUmDYYasKzP",
+        "outputId": "ddbeb77a-ed02-4abd-f399-8e020569742b"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " [0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909, 0.6879236756213909]\n",
+              " [1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625, 1.0318207493880625]"
+            ]
+          },
+          "metadata": {},
+          "execution_count": 35
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Using DataFrames.jl"
+      ],
+      "metadata": {
+        "id": "1JA_OFS7sRby"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "using DataFrames"
+      ],
+      "metadata": {
+        "id": "2Pej7x0esOwL"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Of course you probably will not be using single values to calculate your indices!\n",
+        "This section illustrates how you can use SpectralIndices in conjuction with DataFrames.jl\n",
+        "\n",
+        "Let's load some data to use in the examples:"
+      ],
+      "metadata": {
+        "id": "2hwypTpGsW3F"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "df = load_dataset(\"spectral\", DataFrame)"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 641
+        },
+        "id": "xFZBPyOWsUol",
+        "outputId": "7a495b15-d768-430e-86a6-99b4a9f9261b"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "\u001b[1m120×9 DataFrame\u001b[0m\n",
+              "\u001b[1m Row \u001b[0m│\u001b[1m SR_B5    \u001b[0m\u001b[1m ST_B10  \u001b[0m\u001b[1m SR_B2     \u001b[0m\u001b[1m SR_B6     \u001b[0m\u001b[1m class      \u001b[0m\u001b[1m SR_B4     \u001b[0m\u001b[1m SR_B7     \u001b[0m\u001b[1m SR_B3     \u001b[0m\u001b[1m SR_B1\u001b[0m ⋯\n",
+              "     │\u001b[90m Float64  \u001b[0m\u001b[90m Float64 \u001b[0m\u001b[90m Float64   \u001b[0m\u001b[90m Float64   \u001b[0m\u001b[90m String     \u001b[0m\u001b[90m Float64   \u001b[0m\u001b[90m Float64   \u001b[0m\u001b[90m Float64   \u001b[0m\u001b[90m Float\u001b[0m ⋯\n",
+              "─────┼──────────────────────────────────────────────────────────────────────────────────────────────\n",
+              "   1 │ 0.269054  297.328  0.100795   0.306206   Urban       0.165764   0.251949   0.132227   0.089 ⋯\n",
+              "   2 │ 0.281264  297.108  0.08699    0.267596   Urban       0.160979   0.217917   0.124404   0.073\n",
+              "   3 │ 0.28422   297.436  0.0860275  0.258384   Urban       0.140203   0.200098   0.120994   0.072\n",
+              "   4 │ 0.254479  297.204  0.103916   0.25958    Urban       0.163976   0.216735   0.135981   0.087\n",
+              "   5 │ 0.269535  297.098  0.109306   0.273234   Urban       0.18126    0.219554   0.15035    0.090 ⋯\n",
+              "   6 │ 0.277153  298.212  0.107148   0.32954    Urban       0.19754    0.253929   0.152303   0.092\n",
+              "   7 │ 0.26563   298.402  0.100396   0.271721   Urban       0.170026   0.222331   0.135885   0.087\n",
+              "   8 │ 0.294478  298.448  0.102032   0.318224   Urban       0.186224   0.238515   0.139749   0.090\n",
+              "   9 │ 0.293446  297.604  0.146239   0.29753    Urban       0.210094   0.237649   0.179624   0.132 ⋯\n",
+              "  10 │ 0.275874  299.456  0.102995   0.258645   Urban       0.159411   0.202669   0.134785   0.088\n",
+              "  11 │ 0.31733   298.668  0.124184   0.314731   Urban       0.202229   0.237525   0.166369   0.109\n",
+              "  ⋮  │    ⋮         ⋮         ⋮          ⋮          ⋮           ⋮          ⋮          ⋮          ⋮ ⋱\n",
+              " 111 │ 0.316422  289.686  0.0233825  0.113748   Vegetation  0.033145   0.048105   0.0411475  0.021\n",
+              " 112 │ 0.280782  289.423  0.021045   0.102087   Vegetation  0.029405   0.046015   0.03925    0.019 ⋯\n",
+              " 113 │ 0.292168  289.621  0.0273975  0.122768   Vegetation  0.039525   0.060645   0.048985   0.023\n",
+              " 114 │ 0.247342  289.282  0.0157925  0.07357    Vegetation  0.0270675  0.035345   0.03188    0.009\n",
+              " 115 │ 0.29819   289.532  0.0252525  0.118615   Vegetation  0.0344375  0.05652    0.04277    0.020\n",
+              " 116 │ 0.287822  289.624  0.02154    0.113253   Vegetation  0.0344375  0.0537425  0.0409275  0.018 ⋯\n",
+              " 117 │ 0.281608  289.108  0.0192025  0.10151    Vegetation  0.0299     0.048325   0.04475    0.015\n",
+              " 118 │ 0.239615  288.975  0.01846    0.0889425  Vegetation  0.0262425  0.040845   0.035785   0.014\n",
+              " 119 │ 0.167703  289.597  0.0174975  0.0710125  Vegetation  0.02803    0.0339975  0.0325125  0.013\n",
+              " 120 │ 0.19424   289.375  0.0195875  0.0739275  Vegetation  0.0255825  0.033255   0.0332825  0.014 ⋯\n",
+              "\u001b[36m                                                                        1 column and 99 rows omitted\u001b[0m"
+            ],
+            "text/html": [
+              "<div><div style = \"float: left;\"><span>120×9 DataFrame</span></div><div style = \"float: right;\"><span style = \"font-style: italic;\">95 rows omitted</span></div><div style = \"clear: both;\"></div></div><div class = \"data-frame\" style = \"overflow-x: scroll;\"><table class = \"data-frame\" style = \"margin-bottom: 6px;\"><thead><tr class = \"header\"><th class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">Row</th><th style = \"text-align: left;\">SR_B5</th><th style = \"text-align: left;\">ST_B10</th><th style = \"text-align: left;\">SR_B2</th><th style = \"text-align: left;\">SR_B6</th><th style = \"text-align: left;\">class</th><th style = \"text-align: left;\">SR_B4</th><th style = \"text-align: left;\">SR_B7</th><th style = \"text-align: left;\">SR_B3</th><th style = \"text-align: left;\">SR_B1</th></tr><tr class = \"subheader headerLastRow\"><th class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\"></th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"String\" style = \"text-align: left;\">String</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th><th title = \"Float64\" style = \"text-align: left;\">Float64</th></tr></thead><tbody><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">1</td><td style = \"text-align: right;\">0.269054</td><td style = \"text-align: right;\">297.328</td><td style = \"text-align: right;\">0.100795</td><td style = \"text-align: right;\">0.306206</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.165764</td><td style = \"text-align: right;\">0.251949</td><td style = \"text-align: right;\">0.132227</td><td style = \"text-align: right;\">0.08985</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">2</td><td style = \"text-align: right;\">0.281264</td><td style = \"text-align: right;\">297.108</td><td style = \"text-align: right;\">0.08699</td><td style = \"text-align: right;\">0.267596</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.160979</td><td style = \"text-align: right;\">0.217917</td><td style = \"text-align: right;\">0.124404</td><td style = \"text-align: right;\">0.0738588</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">3</td><td style = \"text-align: right;\">0.28422</td><td style = \"text-align: right;\">297.436</td><td style = \"text-align: right;\">0.0860275</td><td style = \"text-align: right;\">0.258384</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.140203</td><td style = \"text-align: right;\">0.200098</td><td style = \"text-align: right;\">0.120994</td><td style = \"text-align: right;\">0.0729375</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">4</td><td style = \"text-align: right;\">0.254479</td><td style = \"text-align: right;\">297.204</td><td style = \"text-align: right;\">0.103916</td><td style = \"text-align: right;\">0.25958</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.163976</td><td style = \"text-align: right;\">0.216735</td><td style = \"text-align: right;\">0.135981</td><td style = \"text-align: right;\">0.0877325</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">5</td><td style = \"text-align: right;\">0.269535</td><td style = \"text-align: right;\">297.098</td><td style = \"text-align: right;\">0.109306</td><td style = \"text-align: right;\">0.273234</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.18126</td><td style = \"text-align: right;\">0.219554</td><td style = \"text-align: right;\">0.15035</td><td style = \"text-align: right;\">0.0905925</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">6</td><td style = \"text-align: right;\">0.277153</td><td style = \"text-align: right;\">298.212</td><td style = \"text-align: right;\">0.107148</td><td style = \"text-align: right;\">0.32954</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.19754</td><td style = \"text-align: right;\">0.253929</td><td style = \"text-align: right;\">0.152303</td><td style = \"text-align: right;\">0.0927237</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">7</td><td style = \"text-align: right;\">0.26563</td><td style = \"text-align: right;\">298.402</td><td style = \"text-align: right;\">0.100396</td><td style = \"text-align: right;\">0.271721</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.170026</td><td style = \"text-align: right;\">0.222331</td><td style = \"text-align: right;\">0.135885</td><td style = \"text-align: right;\">0.087375</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">8</td><td style = \"text-align: right;\">0.294478</td><td style = \"text-align: right;\">298.448</td><td style = \"text-align: right;\">0.102032</td><td style = \"text-align: right;\">0.318224</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.186224</td><td style = \"text-align: right;\">0.238515</td><td style = \"text-align: right;\">0.139749</td><td style = \"text-align: right;\">0.0901113</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">9</td><td style = \"text-align: right;\">0.293446</td><td style = \"text-align: right;\">297.604</td><td style = \"text-align: right;\">0.146239</td><td style = \"text-align: right;\">0.29753</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.210094</td><td style = \"text-align: right;\">0.237649</td><td style = \"text-align: right;\">0.179624</td><td style = \"text-align: right;\">0.132846</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">10</td><td style = \"text-align: right;\">0.275874</td><td style = \"text-align: right;\">299.456</td><td style = \"text-align: right;\">0.102995</td><td style = \"text-align: right;\">0.258645</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.159411</td><td style = \"text-align: right;\">0.202669</td><td style = \"text-align: right;\">0.134785</td><td style = \"text-align: right;\">0.0882688</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">11</td><td style = \"text-align: right;\">0.31733</td><td style = \"text-align: right;\">298.668</td><td style = \"text-align: right;\">0.124184</td><td style = \"text-align: right;\">0.314731</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.202229</td><td style = \"text-align: right;\">0.237525</td><td style = \"text-align: right;\">0.166369</td><td style = \"text-align: right;\">0.109801</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">12</td><td style = \"text-align: right;\">0.313301</td><td style = \"text-align: right;\">298.202</td><td style = \"text-align: right;\">0.135775</td><td style = \"text-align: right;\">0.387757</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.239285</td><td style = \"text-align: right;\">0.307774</td><td style = \"text-align: right;\">0.189675</td><td style = \"text-align: right;\">0.120677</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">13</td><td style = \"text-align: right;\">0.304721</td><td style = \"text-align: right;\">297.87</td><td style = \"text-align: right;\">0.114022</td><td style = \"text-align: right;\">0.325195</td><td style = \"text-align: left;\">Urban</td><td style = \"text-align: right;\">0.193731</td><td style = \"text-align: right;\">0.246339</td><td style = \"text-align: right;\">0.150652</td><td style = \"text-align: right;\">0.10041</td></tr><tr><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td><td style = \"text-align: right;\">&vellip;</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">109</td><td style = \"text-align: right;\">0.284963</td><td style = \"text-align: right;\">288.756</td><td style = \"text-align: right;\">0.0277275</td><td style = \"text-align: right;\">0.103435</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0407625</td><td style = \"text-align: right;\">0.0704075</td><td style = \"text-align: right;\">0.047555</td><td style = \"text-align: right;\">0.0222825</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">110</td><td style = \"text-align: right;\">0.335342</td><td style = \"text-align: right;\">289.399</td><td style = \"text-align: right;\">0.0269025</td><td style = \"text-align: right;\">0.149525</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.03683</td><td style = \"text-align: right;\">0.0626525</td><td style = \"text-align: right;\">0.0490675</td><td style = \"text-align: right;\">0.0233825</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">111</td><td style = \"text-align: right;\">0.316422</td><td style = \"text-align: right;\">289.686</td><td style = \"text-align: right;\">0.0233825</td><td style = \"text-align: right;\">0.113748</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.033145</td><td style = \"text-align: right;\">0.048105</td><td style = \"text-align: right;\">0.0411475</td><td style = \"text-align: right;\">0.0211</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">112</td><td style = \"text-align: right;\">0.280782</td><td style = \"text-align: right;\">289.423</td><td style = \"text-align: right;\">0.021045</td><td style = \"text-align: right;\">0.102087</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.029405</td><td style = \"text-align: right;\">0.046015</td><td style = \"text-align: right;\">0.03925</td><td style = \"text-align: right;\">0.01967</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">113</td><td style = \"text-align: right;\">0.292168</td><td style = \"text-align: right;\">289.621</td><td style = \"text-align: right;\">0.0273975</td><td style = \"text-align: right;\">0.122768</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.039525</td><td style = \"text-align: right;\">0.060645</td><td style = \"text-align: right;\">0.048985</td><td style = \"text-align: right;\">0.02319</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">114</td><td style = \"text-align: right;\">0.247342</td><td style = \"text-align: right;\">289.282</td><td style = \"text-align: right;\">0.0157925</td><td style = \"text-align: right;\">0.07357</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0270675</td><td style = \"text-align: right;\">0.035345</td><td style = \"text-align: right;\">0.03188</td><td style = \"text-align: right;\">0.00988</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">115</td><td style = \"text-align: right;\">0.29819</td><td style = \"text-align: right;\">289.532</td><td style = \"text-align: right;\">0.0252525</td><td style = \"text-align: right;\">0.118615</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0344375</td><td style = \"text-align: right;\">0.05652</td><td style = \"text-align: right;\">0.04277</td><td style = \"text-align: right;\">0.02022</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">116</td><td style = \"text-align: right;\">0.287822</td><td style = \"text-align: right;\">289.624</td><td style = \"text-align: right;\">0.02154</td><td style = \"text-align: right;\">0.113253</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0344375</td><td style = \"text-align: right;\">0.0537425</td><td style = \"text-align: right;\">0.0409275</td><td style = \"text-align: right;\">0.0180475</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">117</td><td style = \"text-align: right;\">0.281608</td><td style = \"text-align: right;\">289.108</td><td style = \"text-align: right;\">0.0192025</td><td style = \"text-align: right;\">0.10151</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0299</td><td style = \"text-align: right;\">0.048325</td><td style = \"text-align: right;\">0.04475</td><td style = \"text-align: right;\">0.015325</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">118</td><td style = \"text-align: right;\">0.239615</td><td style = \"text-align: right;\">288.975</td><td style = \"text-align: right;\">0.01846</td><td style = \"text-align: right;\">0.0889425</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0262425</td><td style = \"text-align: right;\">0.040845</td><td style = \"text-align: right;\">0.035785</td><td style = \"text-align: right;\">0.01483</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">119</td><td style = \"text-align: right;\">0.167703</td><td style = \"text-align: right;\">289.597</td><td style = \"text-align: right;\">0.0174975</td><td style = \"text-align: right;\">0.0710125</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.02803</td><td style = \"text-align: right;\">0.0339975</td><td style = \"text-align: right;\">0.0325125</td><td style = \"text-align: right;\">0.01362</td></tr><tr><td class = \"rowNumber\" style = \"font-weight: bold; text-align: right;\">120</td><td style = \"text-align: right;\">0.19424</td><td style = \"text-align: right;\">289.375</td><td style = \"text-align: right;\">0.0195875</td><td style = \"text-align: right;\">0.0739275</td><td style = \"text-align: left;\">Vegetation</td><td style = \"text-align: right;\">0.0255825</td><td style = \"text-align: right;\">0.033255</td><td style = \"text-align: right;\">0.0332825</td><td style = \"text-align: right;\">0.01461</td></tr></tbody></table></div>"
+            ],
+            "text/latex": "\\begin{tabular}{r|ccccccccc}\n\t& SR\\_B5 & ST\\_B10 & SR\\_B2 & SR\\_B6 & class & SR\\_B4 & SR\\_B7 & SR\\_B3 & SR\\_B1\\\\\n\t\\hline\n\t& Float64 & Float64 & Float64 & Float64 & String & Float64 & Float64 & Float64 & Float64\\\\\n\t\\hline\n\t1 & 0.269054 & 297.328 & 0.100795 & 0.306206 & Urban & 0.165764 & 0.251949 & 0.132227 & 0.08985 \\\\\n\t2 & 0.281264 & 297.108 & 0.08699 & 0.267596 & Urban & 0.160979 & 0.217917 & 0.124404 & 0.0738588 \\\\\n\t3 & 0.28422 & 297.436 & 0.0860275 & 0.258384 & Urban & 0.140203 & 0.200098 & 0.120994 & 0.0729375 \\\\\n\t4 & 0.254479 & 297.204 & 0.103916 & 0.25958 & Urban & 0.163976 & 0.216735 & 0.135981 & 0.0877325 \\\\\n\t5 & 0.269535 & 297.098 & 0.109306 & 0.273234 & Urban & 0.18126 & 0.219554 & 0.15035 & 0.0905925 \\\\\n\t6 & 0.277153 & 298.212 & 0.107148 & 0.32954 & Urban & 0.19754 & 0.253929 & 0.152303 & 0.0927237 \\\\\n\t7 & 0.26563 & 298.402 & 0.100396 & 0.271721 & Urban & 0.170026 & 0.222331 & 0.135885 & 0.087375 \\\\\n\t8 & 0.294478 & 298.448 & 0.102032 & 0.318224 & Urban & 0.186224 & 0.238515 & 0.139749 & 0.0901113 \\\\\n\t9 & 0.293446 & 297.604 & 0.146239 & 0.29753 & Urban & 0.210094 & 0.237649 & 0.179624 & 0.132846 \\\\\n\t10 & 0.275874 & 299.456 & 0.102995 & 0.258645 & Urban & 0.159411 & 0.202669 & 0.134785 & 0.0882688 \\\\\n\t11 & 0.31733 & 298.668 & 0.124184 & 0.314731 & Urban & 0.202229 & 0.237525 & 0.166369 & 0.109801 \\\\\n\t12 & 0.313301 & 298.202 & 0.135775 & 0.387757 & Urban & 0.239285 & 0.307774 & 0.189675 & 0.120677 \\\\\n\t13 & 0.304721 & 297.87 & 0.114022 & 0.325195 & Urban & 0.193731 & 0.246339 & 0.150652 & 0.10041 \\\\\n\t14 & 0.244359 & 299.471 & 0.0746425 & 0.208347 & Urban & 0.133314 & 0.171332 & 0.108055 & 0.0624875 \\\\\n\t15 & 0.241169 & 299.181 & 0.0871825 & 0.24121 & Urban & 0.157101 & 0.186045 & 0.12483 & 0.0679325 \\\\\n\t16 & 0.253984 & 297.183 & 0.0946763 & 0.292058 & Urban & 0.176888 & 0.238075 & 0.133548 & 0.0811875 \\\\\n\t17 & 0.274251 & 296.834 & 0.109512 & 0.304102 & Urban & 0.185921 & 0.235655 & 0.141825 & 0.0968625 \\\\\n\t18 & 0.276602 & 296.175 & 0.104164 & 0.293281 & Urban & 0.175334 & 0.227089 & 0.137343 & 0.0905375 \\\\\n\t19 & 0.269508 & 295.76 & 0.0825488 & 0.2543 & Urban & 0.136971 & 0.187035 & 0.11328 & 0.07082 \\\\\n\t20 & 0.307897 & 297.036 & 0.118491 & 0.302851 & Urban & 0.196426 & 0.260556 & 0.161969 & 0.098925 \\\\\n\t21 & 0.226676 & 297.363 & 0.06334 & 0.19138 & Urban & 0.103944 & 0.147572 & 0.090675 & 0.054375 \\\\\n\t22 & 0.286778 & 297.48 & 0.08655 & 0.277757 & Urban & 0.151189 & 0.219774 & 0.118986 & 0.0789875 \\\\\n\t23 & 0.289803 & 297.598 & 0.113032 & 0.330351 & Urban & 0.197719 & 0.266276 & 0.152935 & 0.101056 \\\\\n\t24 & 0.266744 & 297.255 & 0.12054 & 0.286172 & Urban & 0.201143 & 0.245844 & 0.157582 & 0.108949 \\\\\n\t25 & 0.283973 & 296.783 & 0.120402 & 0.331713 & Urban & 0.212775 & 0.261244 & 0.168582 & 0.103682 \\\\\n\t26 & 0.252829 & 296.318 & 0.0990763 & 0.267665 & Urban & 0.180078 & 0.214012 & 0.136242 & 0.0824663 \\\\\n\t27 & 0.320341 & 298.029 & 0.101084 & 0.344857 & Urban & 0.202421 & 0.272615 & 0.147132 & 0.0877462 \\\\\n\t28 & 0.245459 & 297.263 & 0.095295 & 0.255469 & Urban & 0.165241 & 0.200785 & 0.129876 & 0.0821775 \\\\\n\t29 & 0.295096 & 297.328 & 0.0988288 & 0.322239 & Urban & 0.1806 & 0.243108 & 0.13704 & 0.0832912 \\\\\n\t30 & 0.305024 & 298.094 & 0.0897537 & 0.293226 & Urban & 0.166492 & 0.204745 & 0.128584 & 0.0708475 \\\\\n\t$\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ & $\\dots$ \\\\\n\\end{tabular}\n"
+          },
+          "metadata": {},
+          "execution_count": 37
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Each column of this dataset is the Surface Reflectance from Landsat 8 for 3 different classes. The samples were taken over Oporto. The data is taken from [spyndex](https://spyndex.readthedocs.io/en/latest/tutorials/pandas.html). This dataset specifically contains three different classes:\n"
+      ],
+      "metadata": {
+        "id": "hcdQTSm3saWO"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "unique(df[!, \"class\"])"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "INHOUyP0sYwy",
+        "outputId": "47d39ef2-17ad-4728-e5f7-baaf05a0b97f"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "3-element Vector{String}:\n",
+              " \"Urban\"\n",
+              " \"Water\"\n",
+              " \"Vegetation\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 38
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "so to reflect that we are going to calculate three different indices: `NDVI` for `vegetation`, `NDWI` for `water` and `NDBI` for `urban`.\n",
+        "Let's see what bands we need:"
+      ],
+      "metadata": {
+        "id": "f_QjDTgrseme"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDVI.bands"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "y5vL72b2sdAs",
+        "outputId": "6311ea18-a499-43ca-faff-33e6389a4239"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " \"N\"\n",
+              " \"R\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 39
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDWI.bands"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "aR2Y8lcMsgk-",
+        "outputId": "75b2bd10-736e-4a6f-e675-90f63e880bb3"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " \"G\"\n",
+              " \"N\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 40
+        }
+      ]
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "NDBI.bands"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/"
+        },
+        "id": "ZS4gmTaDshgu",
+        "outputId": "eba95cb7-783e-4e09-84ec-024bdb3c9013"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "execute_result",
+          "data": {
+            "text/plain": [
+              "2-element Vector{Any}:\n",
+              " \"S1\"\n",
+              " \"N\""
+            ]
+          },
+          "metadata": {},
+          "execution_count": 41
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "We need Green, Red, NIR and SWIR1 bands.\n",
+        "\n",
+        "Since the `compute_index` expects the bands to have the same name as the have in the `bands` field we need to select the specific columns that we want out of the dataset and rename them.\n",
+        "\n",
+        "\n",
+        "We can do this easily with `select`:"
+      ],
+      "metadata": {
+        "id": "Mx5XmHmsQ-ZH"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "params_df = select(df, :SR_B3=>:G, :SR_B4=>:R, :SR_B5=>:N, :SR_B6=>:S1)\n"
+      ],
+      "metadata": {
+        "colab": {
+          "base_uri": "https://localhost:8080/",
+          "height": 106
+        },
+        "id": "LpLBO1MUsizz",
+        "outputId": "bd3775ab-b98f-46f7-df02-3b3733781785"
+      },
+      "execution_count": null,
+      "outputs": [
+        {
+          "output_type": "error",
+          "ename": "SyntaxError",
+          "evalue": "invalid syntax (<ipython-input-1-4bf9f03e2012>, line 1)",
+          "traceback": [
+            "\u001b[0;36m  File \u001b[0;32m\"<ipython-input-1-4bf9f03e2012>\"\u001b[0;36m, line \u001b[0;32m1\u001b[0m\n\u001b[0;31m    params_df = select(df, :SR_B3=>:G, :SR_B4=>:R, :SR_B5=>:N, :SR_B6=>:S1)\u001b[0m\n\u001b[0m                           ^\u001b[0m\n\u001b[0;31mSyntaxError\u001b[0m\u001b[0;31m:\u001b[0m invalid syntax\n"
+          ]
+        }
+      ]
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now our dataset is ready, and we just need to call the `compute_index` function"
+      ],
+      "metadata": {
+        "id": "SIJijlBRTuAJ"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"NDWI\", \"NDBI\"], params_df)"
+      ],
+      "metadata": {
+        "id": "F8RvMxwNRAg8"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Another way to obtain this is to feed single `DataFrame`s as kwargs.\n"
+      ],
+      "metadata": {
+        "id": "-9y3j2ybTxkT"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"NDWI\", \"NDBI\"];\n",
+        "    G = select(df, :SR_B3=>:G),\n",
+        "    N = select(df, :SR_B5=>:N),\n",
+        "    R = select(df, :SR_B4=>:R),\n",
+        "    S1 = select(df, :SR_B6=>:S1)\n",
+        ")"
+      ],
+      "metadata": {
+        "id": "FtfI-3PHTwTn"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Alternatively you can define a `Dict` for the indices from the `DataFrame`"
+      ],
+      "metadata": {
+        "id": "agZMNW2_T2EL"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "params_dfdf = Dict(\n",
+        "    \"G\" => df[!, \"SR_B3\"],\n",
+        "    \"N\" => df[!, \"SR_B5\"],\n",
+        "    \"R\" => df[!, \"SR_B4\"],\n",
+        "    \"S1\" => df[!, \"SR_B6\"]\n",
+        ")"
+      ],
+      "metadata": {
+        "id": "AXYi6R1BTz5B"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"NDWI\", \"NDBI\"], params_dfdf)\n"
+      ],
+      "metadata": {
+        "id": "tiQoA5W7T4l6"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Again, we can just feed the single dataframes as kwargs"
+      ],
+      "metadata": {
+        "id": "DHLQxHzrT6Pv"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index([\"NDVI\", \"NDWI\", \"NDBI\"];\n",
+        "    G = df[!, \"SR_B3\"],\n",
+        "    N = df[!, \"SR_B5\"],\n",
+        "    R = df[!, \"SR_B4\"],\n",
+        "    S1 = df[!, \"SR_B6\"]\n",
+        ")"
+      ],
+      "metadata": {
+        "id": "i8ehYPCzT-g-"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "The difference is that using these two approaches will result in an array"
+      ],
+      "metadata": {
+        "id": "apTdantIT82x"
+      }
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Using YAXArrays.jl"
+      ],
+      "metadata": {
+        "id": "JYqqMObNUB4j"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "using YAXArrays, DimensionalData"
+      ],
+      "metadata": {
+        "id": "T-OZuJBwUBfQ"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "As before let's load some data"
+      ],
+      "metadata": {
+        "id": "BtItGCvdUHap"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "yaxa = load_dataset(\"sentinel\", YAXArray)"
+      ],
+      "metadata": {
+        "id": "CCHqaljUUJfo"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "We have a `YAXArray` object with three dimensions: `bands`, `x` and `y`.\n",
+        "Each band is one of the 10 m spectral bands of a Sentinel-2 image.\n",
+        "Data again taken from spyndex\n",
+        "\n",
+        "\n",
+        "The data is stored as `Int64`, so let us convert it to `Float` and rescale it:"
+      ],
+      "metadata": {
+        "id": "wjPt_t7aUL9E"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "scaled_yaxa = yaxa./10000"
+      ],
+      "metadata": {
+        "id": "9pIgJcMtUNhA"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now let's compute the NDVI for this dataset!"
+      ],
+      "metadata": {
+        "id": "3N2DchuvUQt1"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "ndvi = compute_index(\"NDVI\";\n",
+        "    N=scaled_yaxa[bands = At(\"B08\")],\n",
+        "    R=scaled_yaxa[bands = At(\"B04\")]\n",
+        ")"
+      ],
+      "metadata": {
+        "id": "5hSLE3EjUQX7"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Alternatively we can build a custom YAXArrays and feed that into the function"
+      ],
+      "metadata": {
+        "id": "yEIp6MzEUTOG"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "index_R = findfirst(scaled_yaxa.bands.val .== \"B04\")\n",
+        "\n",
+        "index_N = findfirst(scaled_yaxa.bands.val .== \"B08\")\n",
+        "\n",
+        "new_bands_dim = Dim{:Variables}([\"R\", \"N\"])\n",
+        "\n",
+        "nr_data = cat(scaled_yaxa[:, :, index_R], scaled_yaxa[:, :, index_N], dims=3)\n",
+        "\n",
+        "new_yaxa = YAXArray((scaled_yaxa.x, scaled_yaxa.y, new_bands_dim), nr_data)"
+      ],
+      "metadata": {
+        "id": "XsfZhp6SUVj7"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "ATT! Please notice how the `Dim` is called `Variables`.\n",
+        "\n",
+        "This is needed for the internal computation to work properly."
+      ],
+      "metadata": {
+        "id": "vJDTSk8TUcOn"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_index(\"NDVI\", new_yaxa)"
+      ],
+      "metadata": {
+        "id": "gKUVrUQAUeMe"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Computing Kernels\n",
+        "We want to compute the kNDVI for a `YAXArray`."
+      ],
+      "metadata": {
+        "id": "gqoAhXKkUfHR"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "kNDVI"
+      ],
+      "metadata": {
+        "id": "hbw9oYqGUhTT"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "As we see from `bands` we need the `kNN` and `kNR`.\n",
+        "In order to compute these values SpectralIndices.jl provides a `compute_kernel` function.\n",
+        "\n",
+        "If you are curious about the `kNDVI` remember that you always have the source of the index in the `reference` field:\n"
+      ],
+      "metadata": {
+        "id": "wk4vLt-bUi6y"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "kNDVI.reference"
+      ],
+      "metadata": {
+        "id": "3WX0vKw6Ukhx"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "Now that we are up to speed with the literature let's get to the computin'"
+      ],
+      "metadata": {
+        "id": "GPx4-MG-UoSC"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "knn = YAXArray((scaled_yaxa.x, scaled_yaxa.y), fill(1.0, 300, 300))"
+      ],
+      "metadata": {
+        "id": "Dv7cfmheUqt6"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "knr = compute_kernel(\n",
+        "    RBF;\n",
+        "    a = Float64.(scaled_yaxa[bands = At(\"B08\")]),\n",
+        "    b = Float64.(scaled_yaxa[bands = At(\"B04\")]),\n",
+        "    sigma = scaled_yaxa[bands = At(\"B08\")].+scaled_yaxa[bands = At(\"B04\")] ./ 2\n",
+        ")"
+      ],
+      "metadata": {
+        "id": "ls2JIczAUtLl"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "As before, you can decide to build an `YAXArray` and feed that to the `compute_kernel` function if you prefer:\n"
+      ],
+      "metadata": {
+        "id": "xsheIPWdUwNi"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "a = Float64.(scaled_yaxa[bands = At(\"B08\")])\n",
+        "\n",
+        "b = Float64.(scaled_yaxa[bands = At(\"B04\")])\n",
+        "\n",
+        "sigma = scaled_yaxa[bands = At(\"B08\")].+scaled_yaxa[bands = At(\"B04\")] ./ 2\n",
+        "\n",
+        "kernel_dims = Dim{:Variables}([\"a\", \"b\", \"sigma\"])\n",
+        "\n",
+        "params_ks = concatenatecubes([a, b, sigma], kernel_dims)"
+      ],
+      "metadata": {
+        "id": "pZkpIvQBUw9v"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "compute_kernel(RBF, params_ks)"
+      ],
+      "metadata": {
+        "id": "uYM3DTd8U2Qb"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "We can finally compute the kNDVI:"
+      ],
+      "metadata": {
+        "id": "O5GWSJFNU4KZ"
+      }
+    },
+    {
+      "cell_type": "code",
+      "source": [
+        "kndvi = compute_index(\"kNDVI\"; kNN = knn, kNR=knr)"
+      ],
+      "metadata": {
+        "id": "Mdh2IctRU6OO"
+      },
+      "execution_count": null,
+      "outputs": []
+    },
+    {
+      "cell_type": "markdown",
+      "source": [
+        "## Additional info\n",
+        "I will be presenting SpectralIndices.jl in depth at the conference track, tomorrow 03.07.2024! I will go more into the structure of the package and how you can leverage it to improve your workflow with a focus on machine learning applications.\n",
+        "\n",
+        "Additionally you can find the software at **https://github.com/awesome-spectral-indices/SpectralIndices.jl** and related paper at https://isprs-archives.copernicus.org/articles/XLVIII-4-W12-2024/89/2024/isprs-archives-XLVIII-4-W12-2024-89-2024.pdf\n",
+        "\n",
+        "Thank you all for your attention!"
+      ],
+      "metadata": {
+        "id": "wiW2Gs_nU9d7"
+      }
+    }
+  ]
+}

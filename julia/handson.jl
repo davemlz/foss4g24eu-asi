@@ -30,7 +30,7 @@ NDVI(nir, red)
 
 NDVI.bands
 
-# A more flexible way to calculate indices is through the `compute` function.
+# A more flexible way to calculate indices is through the `compute_index` function.
 # This function accepts the `SpectralIndex` struct and parameters as
 # either a dictionary or keyword arguments:
 
@@ -38,21 +38,7 @@ params = Dict(
     "N" => nir,
     "R" => red
 )
-ndvi = compute(NDVI, params)
 
-# Note that the keys in the Dic thave to match the band namesas they are spelled out
-# in the `bands` field.
-# Let's try with kwargs
-
-ndvi = compute(NDVI; N=nir, R=red)
-
-# Order of keyword arguments does not affect the outcome:
-
-ndvi1 = compute(NDVI; N=nir, R=red)
-ndvi2 = compute(NDVI; R=red, N=nir)
-ndvi1 == ndvi2
-
-# Suggested approach: compute_index
 
 params = Dict(
     "N" => nir,
@@ -61,6 +47,10 @@ params = Dict(
 ndvi = compute_index("NDVI", params)
 
 ndvi = compute_index("NDVI"; N=nir, R=red)
+
+ndvi = compute_index(NDVI, params)
+
+ndvi = compute_index(NDVI; N=nir, R=red)
 
 # Quick sidenote on implementation details
 
